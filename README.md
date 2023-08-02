@@ -1,7 +1,6 @@
 # Motion_Analysis_using_Accelerometer_and_Gyroscope_Data
 Motion Analysis using Accelerometer and Gyroscope Data. Python code for detecting motion events, estimating speed with Kalman Filter. Easily customizable.
 
-## GitHub Repository: Motion Analysis using Accelerometer and Gyroscope Data
 
 This repository contains Python code for analyzing motion data captured from accelerometer and gyroscope sensors. The code performs the following tasks:
 

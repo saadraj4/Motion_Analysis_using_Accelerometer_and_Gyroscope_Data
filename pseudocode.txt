@@ -1,0 +1,124 @@
+FUNCTION clear_screen():
+    IF operating_system == 'Windows':
+        EXECUTE 'cls' command
+    ELSE:
+        EXECUTE 'clear' command
+
+
+FUNCTION is_internet_connected():
+    TRY:
+        CREATE_SOCKET_CONNECTION to "8.8.8.8" on port 53 with timeout 2 seconds
+        PRINT "Internet connection is established" in green color
+        RETURN True
+    CATCH OSError:
+        PRINT "Internet is not connected, Please try again!" in red color
+        RETURN False
+
+
+FUNCTION readData(folder):
+    READ accelerometer data from file ".\folder\AD.csv" and store it in accel_data
+    READ gyroscope data from file ".\folder\GD.csv" and store it in gyro_data
+    RETURN accel_data, gyro_data
+
+
+FUNCTION calculateAccelMagnitude(row):
+    CALCULATE magnitude using formula: (row['X [g]'] ** 2 + row['Y [g]'] ** 2 + row['Z [g]'] ** 2) ** 0.5
+    RETURN magnitude
+
+
+FUNCTION calculateGyroMagnitude(row):
+    CALCULATE magnitude using formula: (row['X [°/s]'] ** 2 + row['Y [°/s]'] ** 2 + row['Z [°/s]'] ** 2) ** 0.5
+    RETURN magnitude
+
+
+FUNCTION extended_kalman_filter(speed_estimate, error_covariance, measurement_accel, measurement_gyro, timestamp, Q):
+    # Prediction step
+    speed_prediction = speed_estimate
+    error_prediction = error_covariance + Q
+
+    # Update step for accelerometer data
+    K_accel = error_prediction / (error_prediction + R_accel)
+    speed_estimate = speed_prediction + K_accel * (measurement_accel - speed_prediction)
+    error_covariance = (1 - K_accel) * error_prediction
+
+    # Update step for gyroscope data
+    K_gyro = error_covariance / (error_covariance + R_gyro)
+    speed_estimate = speed_estimate + K_gyro * (measurement_gyro - speed_estimate)
+    error_covariance = (1 - K_gyro) * error_covariance
+
+    RETURN speed_estimate, error_covariance, timestamp
+
+
+FUNCTION shotStart(data, accel_thresh, gyro_thresh):
+    INITIALIZE empty list shot_timestamps to store detected shot events timestamps
+    FOR i = 0 to length(data) - 1:
+        IF data['Acceleration Magnitude [g]'][i] > accel_thresh AND data['Angular Velocity Magnitude [°/s]'][i] > gyro_thresh:
+            SET time[i] to rounded value with one decimal place
+            IF time[i] is not in shot_timestamps:
+                ADD time[i] to shot_timestamps
+    RETURN shot_timestamps
+
+
+FUNCTION shotEnd(data, accel_thresh, gyro_thresh):
+    INITIALIZE empty list shot_timestamps to store detected shot events timestamps
+    FOR i = 0 to length(data) - 1:
+        IF data['Acceleration Magnitude [g]'][i] < accel_thresh AND data['Angular Velocity Magnitude [°/s]'][i] < gyro_thresh:
+            SET time[i] to rounded value with one decimal place
+            IF time[i] is not in shot_timestamps:
+                ADD time[i] to shot_timestamps
+    RETURN shot_timestamps
+
+
+FUNCTION shotSpeed(data, initial_speed_estimate, P, Q):
+    INITIALIZE empty list estimated_speeds
+    FOR i = 0 to length(data) - 1:
+        SET accel_measurement to data['Acceleration Magnitude [g]'][i]
+        SET gyro_measurement to data['Angular Velocity Magnitude [°/s]'][i]
+        SET timestamp to data['Time [s]'][i]
+
+        # Apply Extended Kalman filter for both accelerometer and gyroscope data
+        initial_speed_estimate, P, timestamp = extended_kalman_filter(initial_speed_estimate, P, accel_measurement, gyro_measurement, timestamp, Q)
+        ADD (initial_speed_estimate, timestamp) to estimated_speeds
+
+    INITIALIZE empty dictionary speed_data_dict
+    FOR each (speed, timestamp) in estimated_speeds:
+        SET speed_data_dict[timestamp] to speed
+
+    RETURN speed_data_dict
+
+
+# Main code
+SET folders to ['AA', 'BB', 'CC', 'DD', 'EE', 'FF', 'GG', 'HH', 'II', 'JJ', 'KK', 'LL']
+SET accel_threshold to 3
+SET gyro_threshold to 80
+SET window_size to 10
+SET Q to 0.001
+SET R_accel to 0.1
+SET R_gyro to 1.0
+SET initial_speed_estimate to 0.0
+SET P to 1.0
+SET F to identity matrix with size 1x1
+SET K to 0.0
+INITIALIZE empty list estimated_speeds
+
+FOR each folder in folders:
+    CALL readData(folder) and store the returned values in accel_data and gyro_data
+    CALL calculateAccelMagnitude for each row in accel_data and store the results in a new column 'Acceleration Magnitude [g]'
+    CALL calculateGyroMagnitude for each row in gyro_data and store the results in a new column 'Angular Velocity Magnitude [°/s]'
+    CREATE accel_magnitude_df containing only 'Time [s]' and 'Acceleration Magnitude [g]' columns from accel_data
+    CREATE gyro_magnitude_df containing only 'Time [s]' and 'Angular Velocity Magnitude [°/s]' columns from gyro_data
+    MERGE accel_magnitude_df and gyro_magnitude_df based on 'Time [s]' and store the result in merged_data_df
+
+    CALL shotEnd(merged_data_df, accel_threshold, gyro_threshold) and store the result in timestamps_end
+    CREATE end_df DataFrame with 'Timestamps' column from timestamps_end
+    SAVE end_df to file ".\folder\/ball_static_timestamps folder.csv"
+
+    CALL shotStart(merged_data_df, accel_threshold, gyro_threshold) and store the result in timestamps_start
+    CREATE start_df DataFrame with 'Timestamps' column from timestamps_start
+    SAVE start_df to file ".\folder\/ball_moving_timestamps folder.csv"
+
+    CALL shotSpeed(merged_data_df, initial_speed_estimate, P, Q) and store the result in speed_dict
+    CREATE speed_df DataFrame with 'Timestamps' and 'Speed [g/s]' columns from speed_dict
+    SAVE speed_df to file ".\folder\/ball_speed_estimates folder.csv"
+
+PRINT "Data saved to csv Files in respective folder" in green color
